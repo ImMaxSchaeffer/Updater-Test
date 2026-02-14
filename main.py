@@ -9,6 +9,9 @@ import sys
 import platform
 import time
 import subprocess
+import shutil
+import tempfile
+import urllib.request
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -107,7 +110,7 @@ def display_menu():
     {Style.BRIGHT_WHITE}MENU PRINCIPAL{Style.RESET}
 
     {Style.BRIGHT_GREEN}[1]{Style.RESET}  Test   {Style.DIM}Abrir yes.txt{Style.RESET}
-    {Style.BRIGHT_GREEN}[2]{Style.RESET}  Check  {Style.DIM}Placeholder{Style.RESET}
+    {Style.BRIGHT_GREEN}[2]{Style.RESET}  Check  {Style.DIM}Check for updates{Style.RESET}
     {Style.BRIGHT_GREEN}[3]{Style.RESET}  Exit
 """)
 
@@ -159,9 +162,108 @@ def action_test():
 
 def action_check():
     display_header()
-    print(f"  {Style.BRIGHT_WHITE}CHECK{Style.RESET}")
+    print(f"  {Style.BRIGHT_WHITE}CHECK FOR UPDATES{Style.RESET}")
     print()
-    print(f"  {Style.BRIGHT_YELLOW}!{Style.RESET} Placeholder: aqui va tu logica real despues.")
+
+    # Configuration
+    GDRIVE_FILE_ID = "1JkAlS277xgF-sqf6DJq0Pv4oo2VuM-gI"
+    GITHUB_REPO = "https://github.com/ImMaxSchaeffer/Updater-Test"
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    local_version_path = os.path.join(current_dir, "version.txt")
+
+    # Read local version
+    try:
+        with open(local_version_path, "r", encoding="utf-8") as f:
+            local_version = f.read().strip()
+        print(f"  {Style.CYAN}Local version:{Style.RESET} {local_version}")
+    except FileNotFoundError:
+        local_version = "0.0.0"
+        print(f"  {Style.YELLOW}!{Style.RESET} No local version.txt found, assuming {local_version}")
+
+    # Fetch remote version from Google Drive
+    print(f"  {Style.DIM}Checking for updates...{Style.RESET}")
+    gdrive_url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
+    
+    try:
+        with urllib.request.urlopen(gdrive_url, timeout=10) as response:
+            remote_version = response.read().decode("utf-8").strip()
+        print(f"  {Style.CYAN}Remote version:{Style.RESET} {remote_version}")
+    except Exception as e:
+        print(f"  {Style.BRIGHT_RED}✗{Style.RESET} Failed to fetch remote version: {e}")
+        print()
+        input(f"  {Style.DIM}Presiona Enter para continuar...{Style.RESET}")
+        return
+
+    # Compare versions (simple string comparison works for semantic versioning)
+    def version_tuple(v):
+        return tuple(map(int, v.split('.')))
+
+    try:
+        local_v = version_tuple(local_version)
+        remote_v = version_tuple(remote_version)
+    except ValueError:
+        print(f"  {Style.BRIGHT_RED}✗{Style.RESET} Invalid version format")
+        print()
+        input(f"  {Style.DIM}Presiona Enter para continuar...{Style.RESET}")
+        return
+
+    if remote_v > local_v:
+        print()
+        print(f"  {Style.BRIGHT_GREEN}✓{Style.RESET} Update available! ({local_version} → {remote_version})")
+        print(f"  {Style.DIM}Downloading update from GitHub...{Style.RESET}")
+        
+        # Clone repo to temp directory
+        temp_dir = tempfile.mkdtemp()
+        clone_path = os.path.join(temp_dir, "repo")
+        
+        try:
+            # Clone the repository
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", GITHUB_REPO, clone_path],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode != 0:
+                print(f"  {Style.BRIGHT_RED}✗{Style.RESET} Git clone failed: {result.stderr}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                print()
+                input(f"  {Style.DIM}Presiona Enter para continuar...{Style.RESET}")
+                return
+
+            print(f"  {Style.DIM}Updating files...{Style.RESET}")
+            
+            # Copy all files from cloned repo to current directory (replacing old ones)
+            for item in os.listdir(clone_path):
+                if item == ".git":
+                    continue  # Skip .git folder
+                
+                src = os.path.join(clone_path, item)
+                dst = os.path.join(current_dir, item)
+                
+                if os.path.isdir(src):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+
+            print(f"  {Style.BRIGHT_GREEN}✓{Style.RESET} Update complete! Files have been replaced.")
+            print(f"  {Style.YELLOW}!{Style.RESET} Please restart the application to use the new version.")
+            
+        except subprocess.TimeoutExpired:
+            print(f"  {Style.BRIGHT_RED}✗{Style.RESET} Git clone timed out")
+        except Exception as e:
+            print(f"  {Style.BRIGHT_RED}✗{Style.RESET} Update failed: {e}")
+        finally:
+            # Clean up temp directory
+            shutil.rmtree(temp_dir, ignore_errors=True)
+    else:
+        print()
+        print(f"  {Style.BRIGHT_GREEN}✓{Style.RESET} You are already on the latest version!")
+
     print()
     input(f"  {Style.DIM}Presiona Enter para continuar...{Style.RESET}")
 
